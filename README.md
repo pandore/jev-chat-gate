@@ -133,7 +133,7 @@ Only trusted host code may change modes. The package does not interpret chat com
 
 State is a bounded, atomically replaced JSON file: about 40 history messages / 2 hours, 200 runs / 2 hours, 2,000 dedupe and own-message records / 24 hours (plus the current insertion). With no `stateFile`, state is memory-only and lost on restart. A corrupted or mismatched file throws; it is not silently reset. One process and one gate instance must own each file. For shared workers, use transactional storage in your host integration.
 
-The final check suppresses observed reply-branch changes, unthreaded same-author continuations, expired output, and policy changes. Invalidations survive history pruning and restart. A claimed send is never automatically retried: a crash between claim and send can lose a reply. This is **not exactly-once delivery** or an atomic fence against a new event arriving after the check. Keep transport calls adjacent to permit consumption.
+For ambient drafts, the final check suppresses observed reply-branch changes and unthreaded same-author continuations. Direct drafts keep their explicit invitation and skip those two checks. All drafts are subject to expiry and policy changes. Invalidations survive history pruning and restart. A claimed send is never automatically retried: a crash between claim and send can lose a reply. This is **not exactly-once delivery** or an atomic fence against a new event arriving after the check. Keep transport calls adjacent to permit consumption.
 
 ## Privacy and release scope
 

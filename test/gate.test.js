@@ -53,6 +53,18 @@ test('successful receipts support unmentioned follow-ups and direct reply detect
   assert.match(request.state, /Recent dialogue candidate: false/);
 });
 
+test('self echoes can precede receipts, but only receipts establish dialogue continuity', async () => {
+  const g = gate({ evaluate: async () => ({ ...no, unresolved_request: 0.6 }) });
+  const direct = await g.admit(event('q', { addressedToAgent: true }));
+  await g.takeSendPermit(direct.token);
+  await g.observe(event('answer', { authorKind: 'self', authorId: 'bot-account', replyTo: 'q' }));
+  assert.equal((await g.admit(event('not-yet'))).action, 'ignore');
+  await g.recordSent(direct.token, { scope, id: 'answer', text: 'An explanation.' });
+  assert.equal((await g.admit(event('followup'))).reason, 'dialogue_followup');
+  await g.setMode('quiet');
+  assert.equal((await g.admit(event('reply', { replyTo: 'answer' }))).reason, 'direct');
+});
+
 test('invalidation during evaluation survives history eviction and process restart', async t => {
   const stateFile = await temp(t);
   let resolve, started;
@@ -144,7 +156,7 @@ test('bounded provider context masks common secrets and aliases transport identi
   let captured;
   const g = gate({ evaluate: async req => { captured = req; return yes; } });
   await g.observe(event('previous-id', { authorId: 'private-author', text: 'email@example.test https://example.test password=secret-value' }));
-  await g.admit(event('current-id', { replyTo: 'previous-id', text: 'A'.repeat(9000) + ' How do queues work?' }));
+  await g.admit(event('current-id', { replyTo: 'previous-id', text: 'A'.repeat(99000) + ' How do queues work?' }));
   assert.ok(captured.state.length <= 12000);
   for (const value of ['private-author', 'previous-id', 'current-id', 'secret-value', 'email@example.test', scope])
     assert.equal(captured.state.includes(value), false);

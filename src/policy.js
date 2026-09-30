@@ -40,7 +40,7 @@ export function middleTrim(text, max) {
 export function redact(text) {
   return String(text).replace(/```[\s\S]*?```/g, '[code]')
     .replace(/https?:\/\/\S+/gi, '[url]')
-    .replace(/[\w.+-]+@[\w.-]+\.[a-z]{2,}/gi, '[email]')
+    .replace(/\b[\w.+-]+@[\w.-]+\.[a-z]{2,}/gi, '[email]')
     .replace(/@[a-z0-9_]{3,}/gi, '[handle]')
     .replace(/\b(?:sk|ghp|gho|xoxb|xoxp)[-_][a-z0-9_-]+/gi, '[redacted]')
     .replace(/\b(?:bearer|api[_ -]?key|token|password|secret)\s*[:=]?\s*\S+/gi, '[redacted]')
@@ -88,11 +88,12 @@ export function followupCandidate(history, current, now, ttl) {
   const scoped = history.filter(x => x.ts <= current.ts);
   if (current.replyTo) {
     const parent = scoped.findLast(x => x.id === current.replyTo);
-    if (!parent || (parent.authorKind !== 'self' && parent.authorId !== current.authorId)) return false;
+    if (!parent || (parent.authorKind === 'self' && !parent.confirmed) ||
+        (parent.authorKind !== 'self' && parent.authorId !== current.authorId)) return false;
     const chain = replyChain(scoped, current);
-    return scoped.some(x => x.authorKind === 'self' && now - x.ts <= ttl && (chain.has(x.id) || chain.has(x.replyTo)));
+    return scoped.some(x => x.authorKind === 'self' && x.confirmed && now - x.ts <= ttl && (chain.has(x.id) || chain.has(x.replyTo)));
   }
-  const last = scoped.findLast(x => x.authorKind === 'self' && now - x.ts <= ttl);
+  const last = scoped.findLast(x => x.authorKind === 'self' && x.confirmed && now - x.ts <= ttl);
   if (!last) return false;
   const target = scoped.findLast(x => x.id === last.replyTo && x.authorKind !== 'self');
   const after = scoped.slice(scoped.indexOf(last) + 1).filter(x => x.id !== current.id && x.authorKind !== 'self');

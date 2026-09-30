@@ -41,12 +41,13 @@ export function createChatGate({ scope, profile, evaluate, stateFile, thresholds
 
   function observeRow(s, input, now) {
     const previous = s.history.find(x => x.id === input.id);
-    if (previous) return previous;
-    const row = { ...input, ts: now };
-    s.history.push(row);
+    if (previous && !input.confirmed) return previous;
+    const row = { ...input, ts: previous?.ts ?? now };
+    if (previous) s.history[s.history.indexOf(previous)] = row;
+    else s.history.push(row);
     for (const run of s.runs) {
       if (run.direct || run.invalidated || !['evaluating', 'admitted'].includes(run.status) ||
-          run.observedIds.includes(row.id)) continue;
+          (run.observedIds.includes(row.id) && !input.confirmed)) continue;
       // Latch invalidation now: bounded history can evict its evidence before delivery.
       if (row.replyTo && (run.branchIds.includes(row.replyTo) ||
           [...replyChain(s.history, row)].some(id => run.branchIds.includes(id)))) run.invalidated = 'reply_branch_changed';
@@ -148,11 +149,12 @@ export function createChatGate({ scope, profile, evaluate, stateFile, thresholds
         const run = s.runs.find(x => x.token === token);
         if (run?.status === 'sent' && run.sentId === receipt.id) return { recorded: true };
         if (!run || run.status !== 'claimed') throw new Error('receipt_without_send_permit');
-        if (s.history.some(x => x.id === receipt.id) || s.own.some(x => x.id === receipt.id)) throw new Error('receipt_id_conflict');
+        if (s.history.some(x => x.id === receipt.id && x.authorKind !== 'self') || s.own.some(x => x.id === receipt.id))
+          throw new Error('receipt_id_conflict');
         run.status = 'sent'; run.sentId = receipt.id;
         s.own.push({ id: receipt.id, ts: now });
         s.seen.push({ id: receipt.id, ts: now });
-        observeRow(s, { id: receipt.id, authorId: 'self', authorKind: 'self', text: middleTrim(safe, 1600),
+        observeRow(s, { id: receipt.id, authorId: 'self', authorKind: 'self', confirmed: true, text: middleTrim(safe, 1600),
           replyTo: run.inputId, addressedToAgent: false, addressedToOther: false }, now);
         return { recorded: true };
       });
