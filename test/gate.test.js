@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createChatGate, createJevEvaluator, DEFAULT_THRESHOLDS, route } from '../src/index.js';
+import { createChatGate, createJevEvaluator, DEFAULT_THRESHOLDS, route, redact } from '../src/index.js';
 
 const scope = 'test:account:room:thread';
 const yes = { human_exchange: 0.1, already_answered: 0.1, unresolved_request: 0.9, distinctive_value: 0.8 };
@@ -161,6 +161,13 @@ test('bounded provider context masks common secrets and aliases transport identi
   for (const value of ['private-author', 'previous-id', 'current-id', 'secret-value', 'email@example.test', scope])
     assert.equal(captured.state.includes(value), false);
   assert.match(captured.state, /How do queues work/);
+});
+
+test('long email-like nonmatches do not block ingress with quadratic scanning', () => {
+  const start = performance.now();
+  for (const text of ['a.'.repeat(50000), 'A'.repeat(100000)]) assert.ok(redact(text));
+  assert.ok(performance.now() - start < 2000, '100k-character inputs should not stall the event loop');
+  assert.equal(redact('Contact first.last+tag@example.test please'), 'Contact [email] please');
 });
 
 test('Jev HTTP adapter matches typed contract, validates answers and never retries', async () => {

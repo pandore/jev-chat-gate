@@ -40,7 +40,7 @@ export function middleTrim(text, max) {
 export function redact(text) {
   return String(text).replace(/```[\s\S]*?```/g, '[code]')
     .replace(/https?:\/\/\S+/gi, '[url]')
-    .replace(/\b[\w.+-]+@[\w.-]+\.[a-z]{2,}/gi, '[email]')
+    .replace(/(?<![\w.+-])[\w.+-]+@[\w.-]+\.[a-z]{2,}/gi, '[email]')
     .replace(/@[a-z0-9_]{3,}/gi, '[handle]')
     .replace(/\b(?:sk|ghp|gho|xoxb|xoxp)[-_][a-z0-9_-]+/gi, '[redacted]')
     .replace(/\b(?:bearer|api[_ -]?key|token|password|secret)\s*[:=]?\s*\S+/gi, '[redacted]')
