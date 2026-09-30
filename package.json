@@ -1,0 +1,13 @@
+{
+  "name": "jev-chat-gate",
+  "version": "0.1.0",
+  "description": "A small, framework-independent participation gate for AI agents in group chats.",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=22" },
+  "exports": "./src/index.js",
+  "files": ["src", "examples", "docs", "README.md", "LICENSE", "CHANGELOG.md"],
+  "scripts": { "test": "node --test", "demo": "node examples/demo.js" },
+  "repository": { "type": "git", "url": "https://github.com/pandore/jev-chat-gate.git" },
+  "keywords": ["jev", "typesafe", "agents", "chat", "routing"]
+}
