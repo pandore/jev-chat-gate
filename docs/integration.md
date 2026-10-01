@@ -13,8 +13,8 @@ This package owns participation state. Your host owns authentication, authorizat
 
 Build scopes with an unambiguous encoding, e.g. `JSON.stringify([provider, account, conversation, thread])`. The package's maximum scope length is 256 characters; hash a canonical encoding if needed. Do not merge private/direct channels with public/group scopes. Cross-thread ancestry is intentionally unavailable.
 
-1. Authorize and normalize the original incoming event. Reject stale platform replays beyond your retention window. Both address flags are required booleans. Use platform sender metadata for `human`, `bot`, or `self`; use `unknown` if unavailable. Unknown senders are not covered by the confirmed-bot budget.
-2. Call `admit` before starting the answering model, typing indicators, or agent tools. For context-only traffic call `observe`. Process incoming events in source order; message edits, deletes, and out-of-order reconciliation are not implemented in v0.1.x.
+1. Authorize and normalize the original incoming event. Prefer optional `timestampMs` containing the original creation time as a nonnegative integer in Unix milliseconds, not platform seconds or the edit time. Stale/future admissions are ignored; future context-only timestamps throw. Without the field, reject old platform replays in the host. Both address flags are required booleans. Use platform sender metadata for `human`, `bot`, or `self`; use `unknown` if unavailable. Unknown senders are not covered by the confirmed-bot budget.
+2. Call `admit` before starting the answering model, typing indicators, or agent tools. For context-only traffic call `observe`. Process incoming events in source order. For an authorized edit, set `edited: true` and call `observe` with the original source identity, reply metadata, and creation time. Existing message time and confirmed-own provenance are retained; affected unclaimed drafts are invalidated, including edited direct sources. `admit` on an edit returns `ignore` without reevaluation. The host owns updated direct-request recovery; never start an ungated replacement send. Automatic reevaluation, deletes, and out-of-order reconciliation are not implemented. Edits cannot retract an already claimed send.
 3. Keep observing new ingress during evaluation and generation. The package serializes state mutations, not network/model work. Handle every rejected promise and avoid fallback routes that skip the gate.
 4. Keep the returned token in trusted host state bound to that model run. Never accept a token, scope, operator command, direct-address flag, or delivery receipt from model-authored output. A `consider` result is not an authorization grant for tools or external side effects.
 5. If the model chooses silence, call `cancel`. Otherwise consume `takeSendPermit` immediately before the transport call. If denied, suppress all output and typing. One token allows one message attempt. Automatic chunking, streaming, retries, and alternate tool-send paths require adapter changes; do not let them bypass the boundary.
@@ -44,8 +44,19 @@ Keep exactly one live owner per state file. Before moving to a replacement insta
 
 Only bounded dedupe is provided (24 hours / approximately 2,000 records). High-volume or multi-worker deployments should implement a transactional event ledger in the host rather than share this JSON file. Don't delete state to recover from an error without reconciling pending sends.
 
+Count-based pruning retains pending evaluations, unexpired admitted drafts, and
+claimed sends within the two-hour retention window. A new admission returns
+`run_capacity` at 200 pending runs, before model evaluation, for ambient and direct
+traffic alike. This is overload, not deliberate conversational silence. Report
+it through the host's operational handling without bypassing the gate or blindly
+retrying. Cancel abandoned drafts; expired admitted drafts release capacity.
+Claimed sends still occupy a slot until confirmed or retention expires.
+On admission, legacy drafts without an expiry inherit their original TTL when
+their configuration hash matches; mismatched-policy drafts cannot authorize a
+send or keep capacity reserved. Claimed legacy sends remain protected.
+
 ## Minimum adapter acceptance
 
-Use a private test conversation and synthetic text. Verify a direct request; an ignored ambient exchange; an ambient request with one confirmed receipt; a newer branch reply while drafting; duplicate ingress; policy change while drafting; a send timeout with no retry; and a restart after a permit is consumed. Assert the actual platform message ID, scope, and count. Passing the package's offline tests is not platform acceptance.
+Use a private test conversation and synthetic text. Verify a direct request; an ignored ambient exchange; an ambient request with one confirmed receipt; a newer branch reply and a source edit while drafting; stale timestamped ingress; duplicate ingress; policy change while drafting; a send timeout with no retry; and a restart after a permit is consumed. Assert the actual platform message ID, scope, and count. Passing the package's offline tests is not platform acceptance.
 
 To remove the gate, first set mode `off`, drain/cancel active runs and stop the owner. Disconnect the three integration points and explicitly restore the host's intended baseline participation rules; uninstalling a gate must not accidentally enable “answer every message.” Retain or securely remove private state according to your application's policy.

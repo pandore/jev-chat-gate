@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { Store } from './store.js';
+import { Store, RUN_LIMIT, pendingRun } from './store.js';
 import { DEFAULT_THRESHOLDS, redact, middleTrim, evaluationRequest, followupCandidate, replyChain, route, validateScores } from './policy.js';
 export { createJevEvaluator } from './jev.js';
 export { DEFAULT_THRESHOLDS, redact, route } from './policy.js';
@@ -31,23 +31,40 @@ export function createChatGate({ scope, profile, evaluate, stateFile, thresholds
         !['human', 'bot', 'unknown', 'self'].includes(event.authorKind) ||
         typeof event.addressedToAgent !== 'boolean' || typeof event.addressedToOther !== 'boolean' ||
         typeof event.text !== 'string' || event.text.length > 100000 ||
+        (event.edited !== undefined && typeof event.edited !== 'boolean') ||
+        (event.timestampMs !== undefined && (!Number.isSafeInteger(event.timestampMs) || event.timestampMs < 0)) ||
         (event.replyTo !== undefined && event.replyTo !== null && !textId(event.replyTo))) throw new Error('invalid_event');
     const safe = filter(event.text);
     if (typeof safe !== 'string') throw new Error('invalid_redactor_result');
     return { id: event.id, authorId: event.authorId, authorKind: event.authorKind,
       addressedToAgent: event.addressedToAgent, addressedToOther: event.addressedToOther,
-      replyTo: event.replyTo || null, text: middleTrim(safe, 1600) };
+      replyTo: event.replyTo || null, text: middleTrim(safe, 1600), ts: event.timestampMs,
+      edited: event.edited === true };
   }
 
   function observeRow(s, input, now) {
+    if (input.ts > now) throw new Error('future_timestamp');
     const previous = s.history.find(x => x.id === input.id);
-    if (previous && !input.confirmed) return previous;
-    const row = { ...input, ts: previous?.ts ?? now };
+    const own = input.edited ? s.own.find(x => x.id === input.id) : null;
+    if (own && input.authorKind !== 'self') throw new Error('edit_identity_mismatch');
+    if (input.edited && s.runs.some(x => x.inputId === input.id && x.authorId !== input.authorId))
+      throw new Error('edit_identity_mismatch');
+    if (input.edited && previous && (previous.authorKind !== input.authorKind ||
+        (previous.authorKind !== 'self' && previous.authorId !== input.authorId))) throw new Error('edit_identity_mismatch');
+    if (previous && !input.confirmed && !input.edited) return previous;
+    const { edited, ...data } = input;
+    // Original source metadata can predate an observation or late-receipt fallback; edits never refresh it.
+    const row = { ...data, ts: Math.min(previous?.ts ?? own?.messageTs ?? own?.ts ?? now, input.ts ?? now),
+      ...(previous?.confirmed || own ? { confirmed: true, authorId: previous?.authorId ?? 'self' } : {}) };
+    if (own) own.messageTs = row.ts;
     if (previous) s.history[s.history.indexOf(previous)] = row;
     else s.history.push(row);
     for (const run of s.runs) {
-      if (run.direct || run.invalidated || !['evaluating', 'admitted'].includes(run.status) ||
-          (run.observedIds.includes(row.id) && !input.confirmed)) continue;
+      if (run.invalidated || !['evaluating', 'admitted'].includes(run.status)) continue;
+      if (edited && (run.branchIds.includes(row.id) || (!run.direct && run.observedIds.includes(row.id)))) {
+        run.invalidated = 'message_edited'; continue;
+      }
+      if (run.direct || (run.observedIds.includes(row.id) && !input.confirmed)) continue;
       // Latch invalidation now: bounded history can evict its evidence before delivery.
       if (row.replyTo && (run.branchIds.includes(row.replyTo) ||
           [...replyChain(s.history, row)].some(id => run.branchIds.includes(id)))) run.invalidated = 'reply_branch_changed';
@@ -67,7 +84,17 @@ export function createChatGate({ scope, profile, evaluate, stateFile, thresholds
   async function admit(event) {
     const input = normalize(event);
     const prepared = await store.transact((s, now) => {
+      // Legacy drafts lack a lease. Matching config proves their original TTL;
+      // mismatched policy cannot authorize a send and must not occupy capacity.
+      for (const run of s.runs) if (run.status === 'admitted' && run.expiresAt === undefined)
+        run.expiresAt = run.ts + (run.config === config ? replyTtlMs : 0);
+      if (input.ts !== undefined && (now < input.ts || (!input.edited && now - input.ts >= replyTtlMs)))
+        return { decision: ignore('expired_inbound') };
       const row = observeRow(s, input, now);
+      if (input.edited) {
+        if (!s.seen.some(x => x.id === row.id)) s.seen.push({ id: row.id, ts: now });
+        return { decision: ignore('message_edited') };
+      }
       if (s.seen.some(x => x.id === row.id)) return { decision: ignore('duplicate') };
       s.seen.push({ id: row.id, ts: now });
       if (row.authorKind === 'self' || s.own.some(x => x.id === row.id)) return { decision: ignore('self_message') };
@@ -78,8 +105,9 @@ export function createChatGate({ scope, profile, evaluate, stateFile, thresholds
       const direct = row.addressedToAgent || s.own.some(x => x.id === row.replyTo);
       if (!direct && row.addressedToOther) return { decision: ignore('addressed_to_other') };
       if (!direct && s.mode === 'quiet') return { decision: ignore('quiet_mode') };
+      if (s.runs.filter(x => pendingRun(x, now)).length >= RUN_LIMIT) return { decision: ignore('run_capacity') };
       const token = randomUUID();
-      const run = { token, inputId: row.id, authorId: row.authorId, ts: row.ts, config, revision: s.revision,
+      const run = { token, inputId: row.id, authorId: row.authorId, ts: row.ts, expiresAt: row.ts + replyTtlMs, config, revision: s.revision,
         direct, status: direct ? 'admitted' : 'evaluating', observedIds: s.history.map(x => x.id),
         branchIds: [...replyChain(s.history, row)] };
       s.runs.push(run);
@@ -152,10 +180,10 @@ export function createChatGate({ scope, profile, evaluate, stateFile, thresholds
         if (s.history.some(x => x.id === receipt.id && x.authorKind !== 'self') || s.own.some(x => x.id === receipt.id))
           throw new Error('receipt_id_conflict');
         run.status = 'sent'; run.sentId = receipt.id;
-        s.own.push({ id: receipt.id, ts: now });
         s.seen.push({ id: receipt.id, ts: now });
-        observeRow(s, { id: receipt.id, authorId: 'self', authorKind: 'self', confirmed: true, text: middleTrim(safe, 1600),
+        const row = observeRow(s, { id: receipt.id, authorId: 'self', authorKind: 'self', confirmed: true, text: middleTrim(safe, 1600),
           replyTo: run.inputId, addressedToAgent: false, addressedToOther: false }, now);
+        s.own.push({ id: receipt.id, ts: now, messageTs: row.ts });
         return { recorded: true };
       });
     },

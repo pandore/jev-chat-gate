@@ -75,7 +75,7 @@ chat. They check the core, not your host adapter. For a JavaScript host, install
 the tagged package into its integration project:
 
 ```sh
-npm install github:pandore/jev-chat-gate#v0.1.1
+npm install github:pandore/jev-chat-gate#v0.1.2
 ```
 
 The installation guide is maintained on `main`; older release tags may not include
@@ -96,7 +96,9 @@ They are authoritative for event fields and lifecycle details.
 
 - **Incoming:** after host authorization, construct the trusted event and call
   `admit`. Only `consider` may start the answering path. Use `observe` for
-  context-only traffic; keep observing newer ingress during generation.
+  context-only traffic; keep observing newer ingress during generation. Normalize
+  original creation times to `timestampMs`. Forward trusted edit events with
+  `edited: true` to update context and cancel affected drafts, not to auto-answer.
 - **Before sending:** keep the returned token bound to its host run. On an empty
   answer or `NO_REPLY`, call `cancel` and complete silently. Otherwise call
   `takeSendPermit` immediately before the transport call and suppress output if
@@ -128,7 +130,8 @@ In particular, check a direct request; intentional silence; an admitted untagged
 request with one receipt; a human reply while the agent drafts; duplicate ingress;
 quiet/off mode; and an uncertain send or restart without an automatic second send.
 Check account, chat, and topic isolation. Package tests alone do not cover these
-host behaviors.
+host behaviors. Include a source edit while drafting and an old replay with a
+platform timestamp. Handle `run_capacity` as overload; do not bypass the gate.
 
 Keep the initial rollout in the owner's requested scope. Review missed useful
 requests and unwanted interruptions before adjusting the profile or thresholds.

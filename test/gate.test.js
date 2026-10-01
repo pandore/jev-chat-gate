@@ -187,3 +187,185 @@ test('Jev HTTP adapter matches typed contract, validates answers and never retri
   assert.equal((await gate({ evaluate: failing }).admit(event('q'))).reason, 'evaluation_failed');
   assert.equal(calls, 1);
 });
+
+test('edits update context and cancel an evaluation without starting another answer', async () => {
+  let resolve, started, calls = 0, captured;
+  const ready = new Promise(r => { started = r; });
+  const g = gate({ evaluate: request => {
+    captured = request;
+    if (calls++ === 0) return new Promise(r => { resolve = r; started(); });
+    return yes;
+  } });
+  const pending = g.admit(event('q'));
+  await ready;
+  await g.observe(event('q', { edited: true, text: 'Correction: the queue question is resolved.' }));
+  resolve(yes);
+  assert.equal((await pending).reason, 'message_edited');
+  assert.equal((await g.admit(event('q', { edited: true, text: 'Correction: the queue question is resolved.' }))).reason, 'message_edited');
+  assert.equal(calls, 1);
+  await g.admit(event('new', { authorId: 'b' }));
+  assert.match(captured.state, /Correction: the queue question is resolved/);
+  // The last replayed edit is the current context, not an extra NEW message.
+  assert.equal((captured.state.match(/"kind":"NEW"/g) || []).length, 1);
+});
+
+test('source edits stop ambient and direct drafts across history eviction and restart', async t => {
+  const stateFile = await temp(t), g = gate({ stateFile });
+  const ambient = await g.admit(event('ambient'));
+  const direct = await g.admit(event('direct', { authorId: 'b', addressedToAgent: true }));
+  await g.observe(event('ambient', { edited: true, text: 'Updated ambient question.' }));
+  await g.observe(event('direct', { authorId: 'b', addressedToAgent: true, edited: true, text: 'Updated direct question.' }));
+  for (let n = 0; n < 45; n++) await g.observe(event(`noise-${n}`, { authorId: 'c' }));
+  await assert.rejects(g.observe(event('direct', { authorId: 'intruder', edited: true })), /edit_identity_mismatch/);
+  const restarted = gate({ stateFile });
+  assert.equal((await restarted.takeSendPermit(ambient.token)).reason, 'message_edited');
+  assert.equal((await restarted.takeSendPermit(direct.token)).reason, 'message_edited');
+});
+
+test('unmarked duplicates stay duplicates; edits cannot change identity or forge a confirmed self receipt', async () => {
+  const g = gate();
+  const direct = await g.admit(event('q', { addressedToAgent: true }));
+  assert.equal((await g.admit(event('q', { text: 'Different text without an edit flag.' }))).reason, 'duplicate');
+  await assert.rejects(g.observe(event('q', { authorId: 'intruder', edited: true })), /edit_identity_mismatch/);
+  await assert.rejects(g.observe(event('q', { edited: 'yes' })), /invalid_event/);
+  assert.equal((await g.takeSendPermit(direct.token)).allowed, true);
+  await g.recordSent(direct.token, { scope, id: 'answer', text: 'Original answer.' });
+  await g.observe(event('answer', { authorKind: 'self', authorId: 'bot-account', replyTo: 'q', edited: true, text: 'Corrected answer.' }));
+  const reply = await g.admit(event('reply', { replyTo: 'answer' }));
+  assert.equal(reply.reason, 'direct');
+  await g.observe(event('answer', { authorKind: 'self', authorId: 'bot-account', replyTo: 'q', edited: true, text: 'Another correction.' }));
+  assert.equal((await g.takeSendPermit(reply.token)).reason, 'message_edited');
+  await g.observe(event('unconfirmed-self', { authorKind: 'self', edited: true }));
+  await g.setMode('quiet');
+  assert.equal((await g.admit(event('unknown-reply', { replyTo: 'unconfirmed-self' }))).reason, 'quiet_mode');
+});
+
+test('platform timestamps reject stale replays and preserve the original send deadline', async () => {
+  let now = 1_000_000, calls = 0;
+  const g = gate({ clock: () => now, replyTtlMs: 3000, evaluate: async () => { calls++; return yes; } });
+  for (const timestampMs of [0, now - 3000, now + 1]) {
+    assert.equal((await g.admit(event(`old-${timestampMs}`, { timestampMs, addressedToAgent: true }))).reason, 'expired_inbound');
+  }
+  assert.equal(calls, 0);
+  const fresh = await g.admit(event('fresh', { timestampMs: now - 2999 }));
+  assert.equal((await g.admit(event('future-edit', { timestampMs: now + 1, edited: true }))).reason, 'expired_inbound');
+  assert.equal(fresh.action, 'consider');
+  now++;
+  assert.equal((await g.takeSendPermit(fresh.token)).reason, 'expired');
+  assert.equal((await g.admit(event('legacy', { authorId: 'b', addressedToAgent: true }))).reason, 'direct');
+  for (const timestampMs of [-1, NaN, '1000000', 1.5])
+    await assert.rejects(g.observe(event('bad', { timestampMs })), /invalid_event/);
+  await assert.rejects(g.observe(event('future', { timestampMs: now + 1 })), /future_timestamp/);
+});
+
+test('capacity rejects new work without evicting a pending evaluation, and cancellation frees a slot', async () => {
+  let resolve, started;
+  const ready = new Promise(r => { started = r; });
+  const g = gate({ evaluate: () => new Promise(r => { resolve = r; started(); }) });
+  const pending = g.admit(event('pending'));
+  await ready;
+  const admitted = [];
+  for (let n = 0; n < 199; n++) admitted.push(await g.admit(event(`direct-${n}`, { authorId: `p-${n}`, addressedToAgent: true })));
+  assert.equal((await g.admit(event('overflow', { authorId: 'overflow', addressedToAgent: true }))).reason, 'run_capacity');
+  await g.cancel(admitted[0].token);
+  assert.equal((await g.admit(event('replacement', { authorId: 'replacement', addressedToAgent: true }))).reason, 'direct');
+  resolve(yes);
+  const result = await pending;
+  assert.equal(result.action, 'consider');
+  assert.equal((await g.takeSendPermit(result.token)).allowed, true);
+});
+
+test('a claimed receipt survives more than 200 settled runs and a restart', async t => {
+  const stateFile = await temp(t), g = gate({ stateFile });
+  const pending = await g.admit(event('pending', { addressedToAgent: true }));
+  await g.takeSendPermit(pending.token);
+  for (let n = 0; n < 205; n++) {
+    const decision = await g.admit(event(`direct-${n}`, { authorId: 'b', addressedToAgent: true }));
+    await g.takeSendPermit(decision.token);
+    await g.recordSent(decision.token, { scope, id: `answer-${n}`, text: 'Synthetic answer.' });
+  }
+  // Version 0.1.1 did not persist a draft expiry field. Its claimed state is readable.
+  const legacy = JSON.parse(await readFile(stateFile, 'utf8'));
+  for (const run of legacy.runs) delete run.expiresAt;
+  for (const receipt of legacy.own) delete receipt.messageTs;
+  await writeFile(stateFile, JSON.stringify(legacy));
+  const restarted = gate({ stateFile });
+  assert.equal((await restarted.takeSendPermit(pending.token)).allowed, false);
+  assert.equal((await restarted.recordSent(pending.token, { scope, id: 'late-answer', text: 'Confirmed late delivery.' })).recorded, true);
+});
+
+test('expired admitted drafts release capacity without allowing a stale send', async () => {
+  let now = 10000;
+  const g = gate({ clock: () => now, replyTtlMs: 1000 });
+  let first;
+  for (let n = 0; n < 200; n++) {
+    const decision = await g.admit(event(`direct-${n}`, { addressedToAgent: true }));
+    first ??= decision;
+  }
+  now += 1000;
+  assert.equal((await g.admit(event('fresh', { addressedToAgent: true }))).reason, 'direct');
+  assert.equal((await g.takeSendPermit(first.token)).allowed, false);
+});
+
+test('an edited self receipt retains follow-up provenance after history eviction', async () => {
+  let now = 10000;
+  const g = gate({ clock: () => now, evaluate: async () => ({ ...no, unresolved_request: 0.6 }) });
+  const direct = await g.admit(event('q', { addressedToAgent: true }));
+  await g.takeSendPermit(direct.token);
+  await g.recordSent(direct.token, { scope, id: 'answer', text: 'Original answer.' });
+  for (let n = 0; n < 45; n++) await g.observe(event(`noise-${n}`, { authorId: 'b' }));
+  now += 100;
+  await assert.rejects(g.observe(event('answer', { edited: true })), /edit_identity_mismatch/);
+  await g.observe(event('answer', { edited: true, authorKind: 'self', authorId: 'bot-account', replyTo: 'q', text: 'Corrected answer.' }));
+  const first = await g.admit(event('followup-1', { replyTo: 'answer' }));
+  assert.equal(first.reason, 'direct');
+  await g.cancel(first.token);
+  assert.equal((await g.admit(event('followup-2', { replyTo: 'followup-1' }))).reason, 'dialogue_followup');
+  now += 180000;
+  assert.equal((await g.admit(event('expired-followup', { replyTo: 'followup-1' }))).reason, 'insufficient_value');
+});
+
+test('late receipts cannot refresh an edited self message after pruning and restart', async t => {
+  for (const [prune, withTimestamp] of [['none', false], ['none', true], ['after', false], ['after', true], ['before', true]]) {
+    let now = 10000;
+    const stateFile = await temp(t);
+    const options = { stateFile, clock: () => now, replyTtlMs: 1000,
+      evaluate: async () => ({ ...no, unresolved_request: 0.6 }) };
+    const g = gate(options);
+    const direct = await g.admit(event('q', { addressedToAgent: true }));
+    await g.takeSendPermit(direct.token);
+    await g.observe(event('answer', { authorKind: 'self', authorId: 'bot-account', replyTo: 'q', timestampMs: now }));
+    now += 1001;
+    if (prune === 'before') for (let n = 0; n < 45; n++) await g.observe(event(`noise-${n}`, { authorId: 'b' }));
+    await g.recordSent(direct.token, { scope, id: 'answer', text: 'Original answer.' });
+    if (prune === 'after') for (let n = 0; n < 45; n++) await g.observe(event(`noise-${n}`, { authorId: 'b' }));
+    let restarted = gate(options);
+    await restarted.observe(event('answer', { edited: true, authorKind: 'self', authorId: 'bot-account', replyTo: 'q',
+      ...(withTimestamp ? { timestampMs: 10000 } : {}) }));
+    if (prune === 'before') {
+      for (let n = 0; n < 45; n++) await restarted.observe(event(`after-edit-${n}`, { authorId: 'b' }));
+      restarted = gate(options);
+      await restarted.observe(event('answer', { edited: true, authorKind: 'self', authorId: 'bot-account', replyTo: 'q' }));
+    }
+    const first = await restarted.admit(event('followup-1', { replyTo: 'answer' }));
+    assert.equal(first.reason, 'direct');
+    await restarted.cancel(first.token);
+    assert.equal((await restarted.admit(event('followup-2', { replyTo: 'followup-1' }))).reason, 'insufficient_value',
+      `pruned=${prune}, timestamp=${withTimestamp}`);
+  }
+});
+
+test('legacy admitted drafts use their configured TTL and expired ones do not block new work', async t => {
+  let now = 10000;
+  const stateFile = await temp(t);
+  const options = { stateFile, clock: () => now, replyTtlMs: 1000 };
+  const old = gate(options);
+  for (let n = 0; n < 200; n++) await old.admit(event(`direct-${n}`, { addressedToAgent: true }));
+  const legacy = JSON.parse(await readFile(stateFile, 'utf8'));
+  for (const run of legacy.runs) delete run.expiresAt;
+  await writeFile(stateFile, JSON.stringify(legacy));
+  const restarted = gate(options);
+  assert.equal((await restarted.admit(event('before-expiry', { addressedToAgent: true }))).reason, 'run_capacity');
+  now += 1000;
+  assert.equal((await restarted.admit(event('after-expiry', { addressedToAgent: true }))).reason, 'direct');
+});
