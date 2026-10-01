@@ -248,6 +248,7 @@ test('platform timestamps reject stale replays and preserve the original send de
   }
   assert.equal(calls, 0);
   const fresh = await g.admit(event('fresh', { timestampMs: now - 2999 }));
+  assert.equal((await g.admit(event('future-edit', { timestampMs: now + 1, edited: true }))).reason, 'expired_inbound');
   assert.equal(fresh.action, 'consider');
   now++;
   assert.equal((await g.takeSendPermit(fresh.token)).reason, 'expired');

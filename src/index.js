@@ -86,7 +86,7 @@ export function createChatGate({ scope, profile, evaluate, stateFile, thresholds
       // mismatched policy cannot authorize a send and must not occupy capacity.
       for (const run of s.runs) if (run.status === 'admitted' && run.expiresAt === undefined)
         run.expiresAt = run.ts + (run.config === config ? replyTtlMs : 0);
-      if (!input.edited && input.ts !== undefined && (now < input.ts || now - input.ts >= replyTtlMs))
+      if (input.ts !== undefined && (now < input.ts || (!input.edited && now - input.ts >= replyTtlMs)))
         return { decision: ignore('expired_inbound') };
       const row = observeRow(s, input, now);
       if (input.edited) {
