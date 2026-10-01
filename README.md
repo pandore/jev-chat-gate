@@ -77,6 +77,21 @@ npm install github:pandore/jev-chat-gate#v0.1.1
 
 The package is distributed through GitHub release tags and is not published to the npm registry. It is independent of TypeSafe AI; Jev is their hosted model. The MIT license covers this repository's code, not the provider's model or service.
 
+## Ask your agent to integrate it
+
+Give a coding agent this repository and the request below. It needs access to your
+agent's runtime and configuration; you also need a TypeSafe API key for hosted Jev.
+The [installation guide](docs/agent-install.md) explains how to inspect compatibility,
+build the host adapter, and verify behavior. This is an integration task, not a
+guaranteed one-command installation.
+
+> Integrate https://github.com/pandore/jev-chat-gate into my agent so it can offer
+> useful help in **[group or topic]** without a tag, while preserving direct
+> requests. Read `AGENTS.md`, `docs/agent-install.md`, and `docs/integration.md`.
+> Inspect my installed runtime and implement the smallest supported adapter.
+> Verify it in a private test chat before enabling it in the requested group.
+> Report what works, what remains unsupported, and how I can pause or remove it.
+
 <details>
 <summary>Developer integration, API and operational limits</summary>
 
