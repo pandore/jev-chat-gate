@@ -1,6 +1,6 @@
 {
   "name": "jev-chat-gate",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "A small, framework-independent participation gate for AI agents in group chats.",
   "type": "module",
   "license": "MIT",

@@ -72,7 +72,7 @@ To evaluate the same synthetic conversation with the hosted Jev model, set `TYPE
 Install in another project from the GitHub release tag:
 
 ```sh
-npm install github:pandore/jev-chat-gate#v0.1.1
+npm install github:pandore/jev-chat-gate#v0.1.2
 ```
 
 The package is distributed through GitHub release tags and is not published to the npm registry. It is independent of TypeSafe AI; Jev is their hosted model. The MIT license covers this repository's code, not the provider's model or service.
@@ -149,10 +149,15 @@ const event = {
   replyTo: null, // platform message ID, or null/omitted
   addressedToAgent: false, // trusted mention / direct-chat routing from your host
   addressedToOther: false, // explicit address to another participant
+  // Optional: original message creation time, normalized to Unix milliseconds.
+  // timestampMs: originalPlatformTimestampMs,
+  // edited: true, // trusted edit event; update/cancel only, never auto-answer
 };
 ```
 
 Scope must distinguish **platform, bot account, conversation, and thread**. Use one gate and one state file per scope. Do not construct events from model-generated JSON. Self echoes must be marked `self`; an agent name in text is not identity evidence. See the [integration contract](docs/integration.md) for platform mapping and failure handling.
+
+When `timestampMs` is supplied, stale or future admissions are ignored and the reply deadline starts at the original source time. Without it, the gate uses observation time and the host must reject old replays. For edits, call `observe({ ...event, edited: true })` with trusted original identity and creation time. Affected drafts are invalidated with `message_edited`; calling `admit` on an edit also updates context but returns `ignore`. The host owns any recovery for updated direct requests. No edit can undo an already claimed send.
 
 ## Decisions
 
@@ -176,7 +181,7 @@ These are starting values from one community, **not universal calibration**. Ove
 | API / option | Behavior |
 | --- | --- |
 | `admit(event)` | Observes and routes one incoming message; duplicates are ignored. |
-| `observe(event)` | Adds context and invalidates stale pending output without evaluation. |
+| `observe(event)` | Adds context and invalidates stale pending output; `edited: true` updates a known message without evaluation. |
 | `setMode('normal')` | Direct and ambient participation. |
 | `setMode('quiet')` | Direct requests only. |
 | `setMode('off')` | No new text participation, including direct requests. |
@@ -190,9 +195,9 @@ These are starting values from one community, **not universal calibration**. Ove
 
 Only trusted host code may change modes. The package does not interpret chat commands or authorize operators. A mode change invalidates outstanding unclaimed permits, including direct requests.
 
-State is a bounded, atomically replaced JSON file: about 40 history messages / 2 hours, 200 runs / 2 hours, 2,000 dedupe and own-message records / 24 hours (plus the current insertion). With no `stateFile`, state is memory-only and lost on restart. A corrupted or mismatched file throws; it is not silently reset. One process and one gate instance must own each file. For shared workers, use transactional storage in your host integration.
+State is a bounded, atomically replaced JSON file: about 40 history messages / 2 hours, 200 runs / 2 hours, 2,000 dedupe and own-message records / 24 hours (plus the current insertion). Pending evaluations, unexpired admitted drafts, and claimed sends are protected from count-based pruning within retention. At 200 pending runs, a new admission returns `ignore` with `run_capacity`, including direct requests; report this as operational overload rather than a relevance judgment, and never bypass the send boundary. Cancel abandoned drafts. Expired admitted drafts free capacity; claimed sends remain consumed and occupy a slot until settled or the two-hour retention expires. Legacy state may briefly retain an extra pending record rather than discard it. With no `stateFile`, state is memory-only and lost on restart. A corrupted or mismatched file throws; it is not silently reset. One process and one gate instance must own each file. For shared workers, use transactional storage in your host integration.
 
-For ambient drafts, the final check suppresses observed reply-branch changes and unthreaded same-author continuations. Direct drafts keep their explicit invitation and skip those two checks. All drafts are subject to expiry and policy changes. Invalidations survive history pruning and restart. A claimed send is never automatically retried: a crash between claim and send can lose a reply. This is **not exactly-once delivery** or an atomic fence against a new event arriving after the check. Keep transport calls adjacent to permit consumption.
+For ambient drafts, the final check suppresses observed reply-branch changes and unthreaded same-author continuations. Direct drafts keep their explicit invitation and skip those two checks. Edits invalidate ambient drafts whose observed context changed and direct drafts whose source or reply ancestry changed. All drafts are subject to expiry and policy changes. Invalidations survive history pruning and restart. A claimed send is never automatically retried: a crash between claim and send can lose a reply. This is **not exactly-once delivery** or an atomic fence against a new event arriving after the check. Keep transport calls adjacent to permit consumption.
 
 ## Privacy and release scope
 
@@ -201,6 +206,8 @@ The provider receives the capability profile and up to 12 text messages, with tr
 v0.1.x provides text participation, dialogue continuity, deterministic controls, a Jev HTTP adapter, and an offline demo. It does not include channel SDKs, a stock OpenClaw plugin, model prompting orchestration, message batching, automatic roles, or emoji delivery. The broader [participation approach](docs/approach.md) explains how those fit without making them dependencies of the core, including a reusable reaction rubric that distinguishes a required answer from a merely possible comment and a paired evaluation procedure. The [integration contract](docs/integration.md#silence-is-a-successful-completion) also covers native completion policies so intentional silence does not become an error message.
 
 This is an extracted reference implementation. The tests cover routing/lifecycle invariants and a stubbed HTTP contract, not real-world conversational quality or platform end-to-end delivery. The live Jev demo is opt-in. Validate your own adapter with platform receipts before enabling ambient replies.
+
+Behavior-changing proposals that need more evidence are tracked in the [backlog](docs/backlog.md).
 
 Protocol references: [TypeSafe API](https://docs.typesafe.ai/api), [Noul semantics](https://docs.typesafe.ai/primitives/noul). No provider code or model weights are bundled; provider access remains subject to its terms.
 
