@@ -45,14 +45,16 @@ export function createChatGate({ scope, profile, evaluate, stateFile, thresholds
   function observeRow(s, input, now) {
     if (input.ts > now) throw new Error('future_timestamp');
     const previous = s.history.find(x => x.id === input.id);
+    const own = input.edited ? s.own.find(x => x.id === input.id) : null;
+    if (own && input.authorKind !== 'self') throw new Error('edit_identity_mismatch');
     if (input.edited && s.runs.some(x => x.inputId === input.id && x.authorId !== input.authorId))
       throw new Error('edit_identity_mismatch');
     if (input.edited && previous && (previous.authorKind !== input.authorKind ||
         (previous.authorKind !== 'self' && previous.authorId !== input.authorId))) throw new Error('edit_identity_mismatch');
     if (previous && !input.confirmed && !input.edited) return previous;
     const { edited, ...data } = input;
-    const row = { ...data, ts: previous?.ts ?? input.ts ?? now,
-      ...(previous?.confirmed ? { confirmed: true, authorId: previous.authorId } : {}) };
+    const row = { ...data, ts: previous?.ts ?? own?.ts ?? input.ts ?? now,
+      ...(previous?.confirmed || own ? { confirmed: true, authorId: previous?.authorId ?? 'self' } : {}) };
     if (previous) s.history[s.history.indexOf(previous)] = row;
     else s.history.push(row);
     for (const run of s.runs) {
@@ -80,6 +82,10 @@ export function createChatGate({ scope, profile, evaluate, stateFile, thresholds
   async function admit(event) {
     const input = normalize(event);
     const prepared = await store.transact((s, now) => {
+      // Legacy drafts lack a lease. Matching config proves their original TTL;
+      // mismatched policy cannot authorize a send and must not occupy capacity.
+      for (const run of s.runs) if (run.status === 'admitted' && run.expiresAt === undefined)
+        run.expiresAt = run.ts + (run.config === config ? replyTtlMs : 0);
       if (!input.edited && input.ts !== undefined && (now < input.ts || now - input.ts >= replyTtlMs))
         return { decision: ignore('expired_inbound') };
       const row = observeRow(s, input, now);

@@ -304,3 +304,36 @@ test('expired admitted drafts release capacity without allowing a stale send', a
   assert.equal((await g.admit(event('fresh', { addressedToAgent: true }))).reason, 'direct');
   assert.equal((await g.takeSendPermit(first.token)).allowed, false);
 });
+
+test('an edited self receipt retains follow-up provenance after history eviction', async () => {
+  let now = 10000;
+  const g = gate({ clock: () => now, evaluate: async () => ({ ...no, unresolved_request: 0.6 }) });
+  const direct = await g.admit(event('q', { addressedToAgent: true }));
+  await g.takeSendPermit(direct.token);
+  await g.recordSent(direct.token, { scope, id: 'answer', text: 'Original answer.' });
+  for (let n = 0; n < 45; n++) await g.observe(event(`noise-${n}`, { authorId: 'b' }));
+  now += 100;
+  await assert.rejects(g.observe(event('answer', { edited: true })), /edit_identity_mismatch/);
+  await g.observe(event('answer', { edited: true, authorKind: 'self', authorId: 'bot-account', replyTo: 'q', text: 'Corrected answer.' }));
+  const first = await g.admit(event('followup-1', { replyTo: 'answer' }));
+  assert.equal(first.reason, 'direct');
+  await g.cancel(first.token);
+  assert.equal((await g.admit(event('followup-2', { replyTo: 'followup-1' }))).reason, 'dialogue_followup');
+  now += 180000;
+  assert.equal((await g.admit(event('expired-followup', { replyTo: 'followup-1' }))).reason, 'insufficient_value');
+});
+
+test('legacy admitted drafts use their configured TTL and expired ones do not block new work', async t => {
+  let now = 10000;
+  const stateFile = await temp(t);
+  const options = { stateFile, clock: () => now, replyTtlMs: 1000 };
+  const old = gate(options);
+  for (let n = 0; n < 200; n++) await old.admit(event(`direct-${n}`, { addressedToAgent: true }));
+  const legacy = JSON.parse(await readFile(stateFile, 'utf8'));
+  for (const run of legacy.runs) delete run.expiresAt;
+  await writeFile(stateFile, JSON.stringify(legacy));
+  const restarted = gate(options);
+  assert.equal((await restarted.admit(event('before-expiry', { addressedToAgent: true }))).reason, 'run_capacity');
+  now += 1000;
+  assert.equal((await restarted.admit(event('after-expiry', { addressedToAgent: true }))).reason, 'direct');
+});

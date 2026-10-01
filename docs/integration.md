@@ -51,6 +51,9 @@ traffic alike. This is overload, not deliberate conversational silence. Report
 it through the host's operational handling without bypassing the gate or blindly
 retrying. Cancel abandoned drafts; expired admitted drafts release capacity.
 Claimed sends still occupy a slot until confirmed or retention expires.
+On admission, legacy drafts without an expiry inherit their original TTL when
+their configuration hash matches; mismatched-policy drafts cannot authorize a
+send or keep capacity reserved. Claimed legacy sends remain protected.
 
 ## Minimum adapter acceptance
 
