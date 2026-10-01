@@ -326,7 +326,7 @@ test('an edited self receipt retains follow-up provenance after history eviction
 });
 
 test('late receipts cannot refresh an edited self message after pruning and restart', async t => {
-  for (const prune of [false, true]) for (const withTimestamp of [false, true]) {
+  for (const [prune, withTimestamp] of [['none', false], ['none', true], ['after', false], ['after', true], ['before', true]]) {
     let now = 10000;
     const stateFile = await temp(t);
     const options = { stateFile, clock: () => now, replyTtlMs: 1000,
@@ -336,11 +336,17 @@ test('late receipts cannot refresh an edited self message after pruning and rest
     await g.takeSendPermit(direct.token);
     await g.observe(event('answer', { authorKind: 'self', authorId: 'bot-account', replyTo: 'q', timestampMs: now }));
     now += 1001;
+    if (prune === 'before') for (let n = 0; n < 45; n++) await g.observe(event(`noise-${n}`, { authorId: 'b' }));
     await g.recordSent(direct.token, { scope, id: 'answer', text: 'Original answer.' });
-    if (prune) for (let n = 0; n < 45; n++) await g.observe(event(`noise-${n}`, { authorId: 'b' }));
-    const restarted = gate(options);
+    if (prune === 'after') for (let n = 0; n < 45; n++) await g.observe(event(`noise-${n}`, { authorId: 'b' }));
+    let restarted = gate(options);
     await restarted.observe(event('answer', { edited: true, authorKind: 'self', authorId: 'bot-account', replyTo: 'q',
       ...(withTimestamp ? { timestampMs: 10000 } : {}) }));
+    if (prune === 'before') {
+      for (let n = 0; n < 45; n++) await restarted.observe(event(`after-edit-${n}`, { authorId: 'b' }));
+      restarted = gate(options);
+      await restarted.observe(event('answer', { edited: true, authorKind: 'self', authorId: 'bot-account', replyTo: 'q' }));
+    }
     const first = await restarted.admit(event('followup-1', { replyTo: 'answer' }));
     assert.equal(first.reason, 'direct');
     await restarted.cancel(first.token);

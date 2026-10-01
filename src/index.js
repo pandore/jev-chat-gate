@@ -53,8 +53,10 @@ export function createChatGate({ scope, profile, evaluate, stateFile, thresholds
         (previous.authorKind !== 'self' && previous.authorId !== input.authorId))) throw new Error('edit_identity_mismatch');
     if (previous && !input.confirmed && !input.edited) return previous;
     const { edited, ...data } = input;
-    const row = { ...data, ts: previous?.ts ?? own?.messageTs ?? input.ts ?? own?.ts ?? now,
+    // Original source metadata can predate an observation or late-receipt fallback; edits never refresh it.
+    const row = { ...data, ts: Math.min(previous?.ts ?? own?.messageTs ?? own?.ts ?? now, input.ts ?? now),
       ...(previous?.confirmed || own ? { confirmed: true, authorId: previous?.authorId ?? 'self' } : {}) };
+    if (own) own.messageTs = row.ts;
     if (previous) s.history[s.history.indexOf(previous)] = row;
     else s.history.push(row);
     for (const run of s.runs) {
