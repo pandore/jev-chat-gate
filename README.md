@@ -1,25 +1,57 @@
 # Jev Chat Gate
 
-**Let an AI agent participate in a group chat without answering everything.**
+**Useful AI participation, with room for human conversation.**
 
-A small participation gate extracted from our work on a community agent. Jev judges whether a contribution may be useful; your main model writes the answer and can still choose silence. The host owns permissions, identity, and delivery.
+Jev Chat Gate helps an AI assistant choose when to join a group conversation. People can talk to each other, ask the agent directly, and continue a useful exchange without every message starting the answering model.
 
-Framework-independent JavaScript, Node.js 22+, MIT, zero runtime dependencies. Bring your own chat transport and answering model. This project is independent of TypeSafe AI; Jev is their hosted model, not an open-source model included here.
+The agent gets two opportunities to stay quiet: before it starts an unsolicited answer, and before it sends a draft that may have become unnecessary. Your main model still writes the answer and can choose silence too.
 
-```mermaid
-flowchart LR
-  A[Authorized incoming event] --> B[Identity, dedupe, mode, bot budget]
-  B --> C{Direct request?}
-  C -->|yes| E[Main model may answer]
-  C -->|no| D[Four Jev judgments]
-  D -->|useful| E
-  D -->|intrusive or low value| S[Silence]
-  E --> F[Freshness and one-use send permit]
-  F -->|allowed| G[Host sends and records receipt]
-  F -->|conversation changed| S
+## What changes in the agent's behavior
+
+| Integration pattern | Behavior with Jev Chat Gate | Intended benefit for people |
+| --- | --- | --- |
+| Start the answering model for every message. | Evaluate intrusion, redundancy, an open request and concrete value before starting an unsolicited answer. | More room for conversation between people; fewer opportunities for unwanted commentary. |
+| Start the agent only after a mention. | Open group questions can be admitted without a mention; observed dialogue context can support an unmentioned follow-up. | People can get help and continue an exchange without repeatedly calling the bot. |
+| Send every completed draft. | Recheck the ambient draft's reply branch, freshness and current policy before sending. | A person replying while the agent drafts can prevent a redundant message. |
+| Ask the model to be quiet through its prompt. | Quiet mode admits direct requests only; off mode blocks new text participation. | A predictable way to reduce agent activity. |
+
+Direct requests and replies to confirmed assistant messages bypass relevance scoring while respecting mode, duplicate and bot-budget controls. The gate changes **when the agent may participate**. Answer quality, personality and factual accuracy still depend on your answering model and its context.
+
+## A result you can reproduce
+
+The included [offline demo](examples/demo.js) runs one small conversation:
+
+1. An unanswered group question is admitted for consideration.
+2. A person replies to that question before the agent sends. The agent's send permit is denied.
+3. Quiet mode is enabled. A direct request to the agent is still admitted.
+
+```text
+Group question: consider unresolved_request
+Another person replied while drafting: reply_branch_changed
+Direct request in quiet mode: direct
+Demo finished. No messages sent to any chat.
 ```
 
+This demonstrates a concrete behavior change: an admitted draft does not automatically become another message in the chat. The demo uses synthetic scores, so it verifies control flow rather than Jev's conversational judgment.
+
+The [tests](test/gate.test.js) also verify duplicate suppression, follow-up context, mode changes, bot-turn budgets, evaluator failures and send-permit behavior across restarts. These checks establish routing and lifecycle behavior. Real participant experience still needs review in your community: unwanted interruptions, missed useful requests, coherent follow-ups and confirmed delivery. We do not claim a universal accuracy score or measured participant-satisfaction improvement.
+
+## Where it fits
+
+- **Community chats:** technical questions, shared experience and discussions between members.
+- **Team and project chats:** help on open questions while people continue their own work.
+- **Learning groups:** explanations when someone needs them, with room for peer answers.
+- **Client-and-team groups:** participation within the context and permissions provided by your host.
+
+It is most useful where participation is optional. In a one-to-one support conversation where every message expects an answer, relevance gating has less work to do.
+
+You can integrate it with Telegram, Slack, Discord or another transport that provides trusted message identities and reply links. This repository provides a framework-independent JavaScript core, **not ready-made platform adapters or an OpenClaw plugin**. Bring your own answering model and chat transport; the [host integration contract](docs/integration.md) explains the required boundaries.
+
+For optional recognition through reactions and a method for checking conversational quality, see the [participation approach](docs/approach.md). Reaction evaluation and emoji delivery are not implemented in this package.
+
 ## Try it
+
+Node.js 22+, MIT, zero runtime dependencies. The offline demo needs no credentials or network access.
 
 ```sh
 git clone https://github.com/pandore/jev-chat-gate.git
@@ -28,7 +60,7 @@ npm test
 npm run demo
 ```
 
-The demo uses synthetic scores and conversation text. No credentials, installation step, or network access required. To evaluate those same synthetic examples with Jev, set `TYPESAFE_API_KEY` in your environment and run `npm run demo -- --live`. This consumes provider quota; it never posts chat messages.
+To evaluate the same synthetic conversation with the hosted Jev model, set `TYPESAFE_API_KEY` and run `npm run demo -- --live`. This consumes provider quota and never posts chat messages; the model's admission result can differ from the offline fixture.
 
 Install in another project from the GitHub release tag:
 
@@ -36,7 +68,10 @@ Install in another project from the GitHub release tag:
 npm install github:pandore/jev-chat-gate#v0.1.1
 ```
 
-The package is distributed through GitHub release tags; it is not published to the npm registry.
+The package is distributed through GitHub release tags and is not published to the npm registry. It is independent of TypeSafe AI; Jev is their hosted model. The MIT license covers this repository's code, not the provider's model or service.
+
+<details>
+<summary>Developer integration, API and operational limits</summary>
 
 ## Integrate
 
@@ -58,8 +93,8 @@ async function onMessage(event) {
 
   try {
     // Implement with your model. An admission is not an obligation to reply.
-    const answer = await draftAnswer(event);
-    if (!answer || answer.trim() === 'NO_REPLY') {
+    const answer = (await draftAnswer(event))?.trim();
+    if (!answer || answer === 'NO_REPLY') {
       await gate.cancel(decision.token);
       return;
     }
@@ -76,7 +111,9 @@ async function onMessage(event) {
 }
 ```
 
-`draftAnswer` and `sendMessage` are host functions, not package APIs. Keep admitting or observing newer messages while a draft is running: a queue that blocks all ingress until generation ends cannot notice intervening replies. Fail closed on rejected gate calls; do not catch an error and proceed to generation or sending.
+`draftAnswer` and `sendMessage` are host functions, not package APIs. Supply your conversation context to the answering model; the gate does not provide it to `draftAnswer`. Keep admitting or observing newer messages while a draft is running: a queue that blocks all ingress until generation ends cannot notice intervening replies. Fail closed on rejected gate calls; do not catch an error and proceed to generation or sending.
+
+If your framework requires every completed turn to produce visible output, configure its ambient completion boundary to allow deliberate silence. Otherwise it can turn `NO_REPLY` into an error placeholder. Preserve required-answer recovery for direct requests. See [silence as a successful completion](docs/integration.md#silence-is-a-successful-completion).
 
 An input event has this explicit contract:
 
@@ -144,6 +181,8 @@ v0.1.x provides text participation, dialogue continuity, deterministic controls,
 This is an extracted reference implementation. The tests cover routing/lifecycle invariants and a stubbed HTTP contract, not real-world conversational quality or platform end-to-end delivery. The live Jev demo is opt-in. Validate your own adapter with platform receipts before enabling ambient replies.
 
 Protocol references: [TypeSafe API](https://docs.typesafe.ai/api), [Noul semantics](https://docs.typesafe.ai/primitives/noul). No provider code or model weights are bundled; provider access remains subject to its terms.
+
+</details>
 
 ## Contributing
 
