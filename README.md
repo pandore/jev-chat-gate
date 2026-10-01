@@ -33,10 +33,10 @@ The demo uses synthetic scores and conversation text. No credentials, installati
 Install in another project from the GitHub release tag:
 
 ```sh
-npm install github:pandore/jev-chat-gate#v0.1.0
+npm install github:pandore/jev-chat-gate#v0.1.1
 ```
 
-There is no npm registry release in v0.1.0.
+The package is distributed through GitHub release tags; it is not published to the npm registry.
 
 ## Integrate
 
@@ -139,7 +139,7 @@ For ambient drafts, the final check suppresses observed reply-branch changes and
 
 The provider receives the capability profile and up to 12 text messages, with transport IDs replaced by local aliases. The default filter masks common URLs, handles, emails, token patterns, code blocks, and long numbers; it cannot reliably remove all sensitive information. Review what your community permits sharing, and replace the filter or evaluator where needed. Local state contains source IDs and filtered message text; keep it private. The library does not log content or credentials.
 
-v0.1.0 provides text participation, dialogue continuity, deterministic controls, a Jev HTTP adapter, and an offline demo. It does not include channel SDKs, a stock OpenClaw plugin, model prompting orchestration, message batching, automatic roles, or emoji delivery. The broader [participation approach](docs/approach.md) explains how those fit without making them dependencies of the core.
+v0.1.x provides text participation, dialogue continuity, deterministic controls, a Jev HTTP adapter, and an offline demo. It does not include channel SDKs, a stock OpenClaw plugin, model prompting orchestration, message batching, automatic roles, or emoji delivery. The broader [participation approach](docs/approach.md) explains how those fit without making them dependencies of the core, including a reusable reaction rubric that distinguishes a required answer from a merely possible comment and a paired evaluation procedure. The [integration contract](docs/integration.md#silence-is-a-successful-completion) also covers native completion policies so intentional silence does not become an error message.
 
 This is an extracted reference implementation. The tests cover routing/lifecycle invariants and a stubbed HTTP contract, not real-world conversational quality or platform end-to-end delivery. The live Jev demo is opt-in. Validate your own adapter with platform receipts before enabling ambient replies.
 
