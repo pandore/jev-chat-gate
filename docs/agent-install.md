@@ -30,6 +30,9 @@ Identify the installed framework/version, the owner-authorized chat scope, the
 current mention policy, and the actual incoming-to-outgoing message path. Read
 the installed source or documentation for that version, rather than guessing
 hook signatures from another release. Preserve unrelated work and configuration.
+Record the original routing and completion settings before changing them so
+rollback can restore that baseline; keep any configuration containing secrets
+in the host's private storage.
 
 Check that the host can:
 
