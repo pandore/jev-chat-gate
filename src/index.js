@@ -53,7 +53,7 @@ export function createChatGate({ scope, profile, evaluate, stateFile, thresholds
         (previous.authorKind !== 'self' && previous.authorId !== input.authorId))) throw new Error('edit_identity_mismatch');
     if (previous && !input.confirmed && !input.edited) return previous;
     const { edited, ...data } = input;
-    const row = { ...data, ts: previous?.ts ?? own?.ts ?? input.ts ?? now,
+    const row = { ...data, ts: previous?.ts ?? own?.messageTs ?? input.ts ?? own?.ts ?? now,
       ...(previous?.confirmed || own ? { confirmed: true, authorId: previous?.authorId ?? 'self' } : {}) };
     if (previous) s.history[s.history.indexOf(previous)] = row;
     else s.history.push(row);
@@ -178,10 +178,10 @@ export function createChatGate({ scope, profile, evaluate, stateFile, thresholds
         if (s.history.some(x => x.id === receipt.id && x.authorKind !== 'self') || s.own.some(x => x.id === receipt.id))
           throw new Error('receipt_id_conflict');
         run.status = 'sent'; run.sentId = receipt.id;
-        s.own.push({ id: receipt.id, ts: now });
         s.seen.push({ id: receipt.id, ts: now });
-        observeRow(s, { id: receipt.id, authorId: 'self', authorKind: 'self', confirmed: true, text: middleTrim(safe, 1600),
+        const row = observeRow(s, { id: receipt.id, authorId: 'self', authorKind: 'self', confirmed: true, text: middleTrim(safe, 1600),
           replyTo: run.inputId, addressedToAgent: false, addressedToOther: false }, now);
+        s.own.push({ id: receipt.id, ts: now, messageTs: row.ts });
         return { recorded: true };
       });
     },

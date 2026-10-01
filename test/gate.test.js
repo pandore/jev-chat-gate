@@ -287,6 +287,7 @@ test('a claimed receipt survives more than 200 settled runs and a restart', asyn
   // Version 0.1.1 did not persist a draft expiry field. Its claimed state is readable.
   const legacy = JSON.parse(await readFile(stateFile, 'utf8'));
   for (const run of legacy.runs) delete run.expiresAt;
+  for (const receipt of legacy.own) delete receipt.messageTs;
   await writeFile(stateFile, JSON.stringify(legacy));
   const restarted = gate({ stateFile });
   assert.equal((await restarted.takeSendPermit(pending.token)).allowed, false);
@@ -322,6 +323,30 @@ test('an edited self receipt retains follow-up provenance after history eviction
   assert.equal((await g.admit(event('followup-2', { replyTo: 'followup-1' }))).reason, 'dialogue_followup');
   now += 180000;
   assert.equal((await g.admit(event('expired-followup', { replyTo: 'followup-1' }))).reason, 'insufficient_value');
+});
+
+test('late receipts cannot refresh an edited self message after pruning and restart', async t => {
+  for (const prune of [false, true]) for (const withTimestamp of [false, true]) {
+    let now = 10000;
+    const stateFile = await temp(t);
+    const options = { stateFile, clock: () => now, replyTtlMs: 1000,
+      evaluate: async () => ({ ...no, unresolved_request: 0.6 }) };
+    const g = gate(options);
+    const direct = await g.admit(event('q', { addressedToAgent: true }));
+    await g.takeSendPermit(direct.token);
+    await g.observe(event('answer', { authorKind: 'self', authorId: 'bot-account', replyTo: 'q', timestampMs: now }));
+    now += 1001;
+    await g.recordSent(direct.token, { scope, id: 'answer', text: 'Original answer.' });
+    if (prune) for (let n = 0; n < 45; n++) await g.observe(event(`noise-${n}`, { authorId: 'b' }));
+    const restarted = gate(options);
+    await restarted.observe(event('answer', { edited: true, authorKind: 'self', authorId: 'bot-account', replyTo: 'q',
+      ...(withTimestamp ? { timestampMs: 10000 } : {}) }));
+    const first = await restarted.admit(event('followup-1', { replyTo: 'answer' }));
+    assert.equal(first.reason, 'direct');
+    await restarted.cancel(first.token);
+    assert.equal((await restarted.admit(event('followup-2', { replyTo: 'followup-1' }))).reason, 'insufficient_value',
+      `pruned=${prune}, timestamp=${withTimestamp}`);
+  }
 });
 
 test('legacy admitted drafts use their configured TTL and expired ones do not block new work', async t => {

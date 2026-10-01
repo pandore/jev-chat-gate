@@ -24,6 +24,7 @@ export class Store {
         value[key].every(row => row && Number.isFinite(row.ts))) &&
       value.history.every(row => typeof row.id === 'string' && typeof row.authorId === 'string' &&
         ['human', 'bot', 'unknown', 'self'].includes(row.authorKind) && typeof row.text === 'string') &&
+      value.own.every(row => row.messageTs === undefined || (Number.isFinite(row.messageTs) && row.messageTs >= 0)) &&
       value.runs.every(row => typeof row.token === 'string' && typeof row.inputId === 'string' &&
         typeof row.config === 'string' && Array.isArray(row.branchIds) && Array.isArray(row.observedIds) &&
         (row.expiresAt === undefined || (Number.isFinite(row.expiresAt) && row.expiresAt >= row.ts)) &&
