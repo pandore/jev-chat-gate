@@ -1,6 +1,8 @@
 # Participation before generation
 
-The starting problem: an agent can be helpful on direct request but exhausting when it treats every group message as an invitation. A system-prompt instruction to “be quiet unless useful” still starts the expensive answering model and may produce typing indicators, tool work, or a reply before the decision is settled.
+The starting point is an agent that answers only when explicitly invited through a tag or direct reply. That keeps participation predictable, but an open question to the group or an opportunity to add useful information can pass by without an invitation.
+
+Our approach adds selective participation without a tag. A narrow relevance stage looks for an unresolved request or a concrete contribution within the agent's capabilities, while checking intrusion and redundancy. The answering model starts only if the ambient message is admitted; direct requests retain their explicit route. These judgments select opportunities to help, rather than guarantee the quality of the eventual answer.
 
 Our approach puts a narrow decision stage before generation, then checks again before delivery. It separates five facts: a message was observed, a contribution was admitted, text was generated, a send was attempted, and delivery was confirmed. None implies the next.
 

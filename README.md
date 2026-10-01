@@ -1,27 +1,32 @@
 # Jev Chat Gate
 
-**Useful AI participation, with room for human conversation.**
+**Help without a tag, when there is a useful reason to join.**
 
-Jev Chat Gate helps an AI assistant choose when to join a group conversation. People can talk to each other, ask the agent directly, and continue a useful exchange without every message starting the answering model.
+With mention-only routing, an agent waits to be tagged. An open question to the group or an opportunity to add useful information can pass by without a direct invitation.
 
-The agent gets two opportunities to stay quiet: before it starts an unsolicited answer, and before it sends a draft that may have become unnecessary. Your main model still writes the answer and can choose silence too.
+Jev Chat Gate adds **selective participation without a tag**. Before starting an unsolicited answer, it evaluates the recent conversation and the agent's capabilities: is there an unanswered request or something concrete to contribute? Has someone already answered, and would joining intrude on a conversation between people?
+
+People can ask the group naturally, and the agent can offer help when the evaluation finds a useful reason to join. Direct requests keep their usual answering path. Your main model still writes the answer and can choose silence; usefulness is a judgment, not a guarantee that every admitted answer will help.
 
 ## What changes in the agent's behavior
 
-| Integration pattern | Behavior with Jev Chat Gate | Intended benefit for people |
+| Conversation moment | Mention-only agent | With Jev Chat Gate |
 | --- | --- | --- |
-| Start the answering model for every message. | Evaluate intrusion, redundancy, an open request and concrete value before starting an unsolicited answer. | More room for conversation between people; fewer opportunities for unwanted commentary. |
-| Start the agent only after a mention. | Open group questions can be admitted without a mention; observed dialogue context can support an unmentioned follow-up. | People can get help and continue an exchange without repeatedly calling the bot. |
-| Send every completed draft. | Recheck the ambient draft's reply branch, freshness and current policy before sending. | A person replying while the agent drafts can prevent a redundant message. |
-| Ask the model to be quiet through its prompt. | Quiet mode admits direct requests only; off mode blocks new text participation. | A predictable way to reduce agent activity. |
+| An open question to the group, without a tag. | Waits for an explicit invitation. | Can admit an answer when the request is unresolved and joining is appropriate. |
+| An opportunity to add concrete information, without a tag. | Waits for an explicit invitation. | Can consider a contribution within the agent's stated capabilities. |
+| A follow-up after a useful exchange, without a new tag or direct reply. | Waits for another explicit invitation. | Observed dialogue context can support an unmentioned continuation. |
+| People are talking to each other, or the question is already answered. | Stays silent unless invited. | Evaluates intrusion and redundancy, and can reject a proactive contribution. |
+| Someone tags the agent or replies directly to its confirmed message. | Uses the direct answering path. | Keeps the direct path without relevance scoring, while respecting participation controls. |
 
-Direct requests and replies to confirmed assistant messages bypass relevance scoring while respecting mode, duplicate and bot-budget controls. The gate changes **when the agent may participate**. Answer quality, personality and factual accuracy still depend on your answering model and its context.
+The benefit is access to useful agent contributions without repeatedly tagging it. Participants can keep a conversation going naturally while relevance checks select opportunities to help. Quiet mode restores direct-request-only participation; off mode blocks new text participation. Duplicate and bot-budget controls still apply.
+
+The gate changes **when the agent may participate**. Answer quality, personality and factual accuracy still depend on your answering model and its context. Before sending an ambient draft, the gate also rechecks its reply branch, freshness and current policy, because the opportunity to help may have passed while the model was drafting.
 
 ## A result you can reproduce
 
 The included [offline demo](examples/demo.js) runs one small conversation:
 
-1. An unanswered group question is admitted for consideration.
+1. An unanswered group question **without a tag** is admitted for consideration.
 2. A person replies to that question before the agent sends. The agent's send permit is denied.
 3. Quiet mode is enabled. A direct request to the agent is still admitted.
 
@@ -32,7 +37,7 @@ Direct request in quiet mode: direct
 Demo finished. No messages sent to any chat.
 ```
 
-This demonstrates a concrete behavior change: an admitted draft does not automatically become another message in the chat. The demo uses synthetic scores, so it verifies control flow rather than Jev's conversational judgment.
+The concrete result is an untagged question entering the answering path, a subsequent human reply stopping the ambient draft, and a direct request still working in quiet mode. The demo uses synthetic scores, so it verifies these routing behaviors rather than Jev's conversational judgment.
 
 The [tests](test/gate.test.js) also verify duplicate suppression, follow-up context, mode changes, bot-turn budgets, evaluator failures and send-permit behavior across restarts. These checks establish routing and lifecycle behavior. Real participant experience still needs review in your community: unwanted interruptions, missed useful requests, coherent follow-ups and confirmed delivery. We do not claim a universal accuracy score or measured participant-satisfaction improvement.
 
