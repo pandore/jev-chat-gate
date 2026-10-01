@@ -8,6 +8,8 @@ Jev Chat Gate adds **selective participation without a tag**. Before starting an
 
 People can ask the group naturally, and the agent can offer help when the evaluation finds a useful reason to join. Direct requests keep their usual answering path. Your main model still writes the answer and can choose silence; usefulness is a judgment, not a guarantee that every admitted answer will help.
 
+![Jev Chat Gate workflow: direct requests go to the main model. Untagged messages are evaluated for an open question, concrete value, redundancy and intrusion, then considered or skipped. A new reply on the same branch can stop an untagged draft before sending.](docs/assets/jev-chat-gate-workflow-en.png)
+
 ## What changes in the agent's behavior
 
 | Conversation moment | Mention-only agent | With Jev Chat Gate |
