@@ -14,13 +14,21 @@ This package owns participation state. Your host owns authentication, authorizat
 Build scopes with an unambiguous encoding, e.g. `JSON.stringify([provider, account, conversation, thread])`. The package's maximum scope length is 256 characters; hash a canonical encoding if needed. Do not merge private/direct channels with public/group scopes. Cross-thread ancestry is intentionally unavailable.
 
 1. Authorize and normalize the original incoming event. Reject stale platform replays beyond your retention window. Both address flags are required booleans. Use platform sender metadata for `human`, `bot`, or `self`; use `unknown` if unavailable. Unknown senders are not covered by the confirmed-bot budget.
-2. Call `admit` before starting the answering model, typing indicators, or agent tools. For context-only traffic call `observe`. Process incoming events in source order; message edits, deletes, and out-of-order reconciliation are not implemented in v0.1.0.
+2. Call `admit` before starting the answering model, typing indicators, or agent tools. For context-only traffic call `observe`. Process incoming events in source order; message edits, deletes, and out-of-order reconciliation are not implemented in v0.1.x.
 3. Keep observing new ingress during evaluation and generation. The package serializes state mutations, not network/model work. Handle every rejected promise and avoid fallback routes that skip the gate.
 4. Keep the returned token in trusted host state bound to that model run. Never accept a token, scope, operator command, direct-address flag, or delivery receipt from model-authored output. A `consider` result is not an authorization grant for tools or external side effects.
 5. If the model chooses silence, call `cancel`. Otherwise consume `takeSendPermit` immediately before the transport call. If denied, suppress all output and typing. One token allows one message attempt. Automatic chunking, streaming, retries, and alternate tool-send paths require adapter changes; do not let them bypass the boundary.
 6. Call `recordSent` only on confirmed success, using the returned platform ID and actual sent text. If transport fails or the outcome is unknown, do not retry that token. Reconcile with the platform separately. A missing receipt means no confirmed own-message continuity.
 
 Policy controls must have their own trusted host authorization. `setMode` is a host API, not a command parser. Inbound text and evaluator results never change modes.
+
+## Silence is a successful completion
+
+An ambient admission permits the main model to consider a reply; it does not require visible output. If that model deliberately returns `NO_REPLY` or an empty answer, cancel the unclaimed token and finish silently. Do not send the marker, an empty message, or an error placeholder to the conversation.
+
+Check the framework's completion policy as well as the send hook. Some runtimes classify “no visible reply” as a failed turn and generate a fallback message after the model has finished. Ambient group participation must permit intentional silence at that boundary. Keep the host's required-answer recovery for direct requests, mentions and authorized commands; an actual evaluation or provider failure is a separate error outcome. Verify these cases again after a runtime upgrade.
+
+This package cannot set that native policy and does not claim version-specific OpenClaw configuration support. Test the installed completion path with transport disabled before enabling ambient participation.
 
 ## OpenClaw and other agent frameworks
 
